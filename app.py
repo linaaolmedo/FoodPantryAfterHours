@@ -1,21 +1,12 @@
 from flask import Flask, request, jsonify
-from models import db, User
-from werkzeug.security import check_password_hash
-from flask_cors import CORS
-from models import db, Menu, Order
-import random
-import os
-
 from flask_sqlalchemy import SQLAlchemy
+from flask_cors import CORS
+from werkzeug.security import generate_password_hash, check_password_hash
+import os
+import random
 
-db = SQLAlchemy()
-
-class MenuItem(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(120), nullable=False)
-    description = db.Column(db.String(250), nullable=False)
-    quantity = db.Column(db.Integer, nullable=False)
-
+# Import db and models from models.py
+from models import db, Menu, Order, User
 
 # Create Flask app
 app = Flask(__name__)
@@ -29,14 +20,23 @@ app.config['SQLALCHEMY_DATABASE_URI'] = f"sqlite:///{os.path.join(BASE_DIR, 'ins
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize the database
+db.init_app(app)
+
+# Create tables within the application context
 with app.app_context():
-    db.init_app(app)
     db.create_all()
 
+
 # Routes
+@app.route('/routes', methods=['GET'])
+def list_routes():
+    """List all routes for debugging."""
+    return jsonify([str(rule) for rule in app.url_map.iter_rules()])
+
 
 @app.route('/login', methods=['POST'])
 def login():
+    """User login route."""
     data = request.json
     email = data.get('email')
     password = data.get('password')
@@ -61,7 +61,25 @@ def get_menu():
         "name": item.name,
         "quantity": item.quantity,
         "description": item.description
-    } for item in menu])
+    } for item in menu]), 200
+
+
+@app.route('/menu', methods=['POST'])
+def add_menu_item():
+    """Add a new menu item."""
+    data = request.json
+    name = data.get('name')
+    description = data.get('description')
+    quantity = data.get('quantity')
+
+    if not all([name, description, quantity]):
+        return jsonify({"success": False, "message": "All fields are required"}), 400
+
+    new_item = Menu(name=name, description=description, quantity=quantity)
+    db.session.add(new_item)
+    db.session.commit()
+
+    return jsonify({"success": True, "message": "Menu item added"}), 201
 
 
 @app.route('/order', methods=['POST'])
@@ -72,12 +90,15 @@ def place_order():
     items = data.get('items')  # Expecting a list of item IDs
     code = f"{random.randint(1000, 9999)}"  # Generate a 4-digit random code
 
+    if not user_id or not items:
+        return jsonify({"success": False, "message": "User ID and items are required"}), 400
+
     # Create a new order
     order = Order(user_id=user_id, items=','.join(map(str, items)), code=code)
     db.session.add(order)
     db.session.commit()
 
-    return jsonify({"order_id": order.order_id, "code": order.code})
+    return jsonify({"success": True, "code": code}), 201
 
 
 @app.route('/verify-code', methods=['POST'])
@@ -87,27 +108,14 @@ def verify_code():
     order_id = data.get('order_id')
     code = data.get('code')
 
+    if not order_id or not code:
+        return jsonify({"success": False, "message": "Order ID and code are required"}), 400
+
     # Check if the order ID and code match
     order = Order.query.filter_by(order_id=order_id, code=code).first()
     if order:
-        return jsonify({"status": "success"})
-    return jsonify({"status": "failed"}), 401
-
-@app.route('/menu', methods=['POST'])
-def add_menu_item():
-    data = request.json
-    name = data.get('name')
-    description = data.get('description')
-    quantity = data.get('quantity')
-
-    if not all([name, description, quantity]):
-        return jsonify({"success": False, "message": "All fields are required"}), 400
-
-    new_item = MenuItem(name=name, description=description, quantity=quantity)
-    db.session.add(new_item)
-    db.session.commit()
-
-    return jsonify({"success": True, "message": "Menu item added"}), 201
+        return jsonify({"success": True, "message": "Code verified"}), 200
+    return jsonify({"success": False, "message": "Invalid code"}), 401
 
 
 if __name__ == '__main__':
