@@ -1,8 +1,21 @@
 from flask import Flask, request, jsonify
+from models import db, User
+from werkzeug.security import check_password_hash
 from flask_cors import CORS
 from models import db, Menu, Order
 import random
 import os
+
+from flask_sqlalchemy import SQLAlchemy
+
+db = SQLAlchemy()
+
+class MenuItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    description = db.Column(db.String(250), nullable=False)
+    quantity = db.Column(db.Integer, nullable=False)
+
 
 # Create Flask app
 app = Flask(__name__)
@@ -20,13 +33,25 @@ with app.app_context():
     db.init_app(app)
     db.create_all()
 
-    # Seed database with test data (only if empty)
-    if not Menu.query.first():  # Ensure context here
-        db.session.add(Menu(name="Pizza", quantity=5, description="Cheese Pizza"))
-        db.session.add(Menu(name="Pasta", quantity=10, description="Spaghetti Bolognese"))
-        db.session.commit()
-
 # Routes
+
+@app.route('/login', methods=['POST'])
+def login():
+    data = request.json
+    email = data.get('email')
+    password = data.get('password')
+
+    if not email or not password:
+        return jsonify({"success": False, "message": "Email and password are required"}), 400
+
+    user = User.query.filter_by(email=email).first()
+
+    if user and check_password_hash(user.password, password):
+        return jsonify({"success": True, "message": "Login successful"}), 200
+
+    return jsonify({"success": False, "message": "Invalid email or password"}), 401
+
+
 @app.route('/menu', methods=['GET'])
 def get_menu():
     """Fetch all menu items."""
@@ -67,6 +92,22 @@ def verify_code():
     if order:
         return jsonify({"status": "success"})
     return jsonify({"status": "failed"}), 401
+
+@app.route('/menu', methods=['POST'])
+def add_menu_item():
+    data = request.json
+    name = data.get('name')
+    description = data.get('description')
+    quantity = data.get('quantity')
+
+    if not all([name, description, quantity]):
+        return jsonify({"success": False, "message": "All fields are required"}), 400
+
+    new_item = MenuItem(name=name, description=description, quantity=quantity)
+    db.session.add(new_item)
+    db.session.commit()
+
+    return jsonify({"success": True, "message": "Menu item added"}), 201
 
 
 if __name__ == '__main__':
